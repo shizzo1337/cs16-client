@@ -42,6 +42,14 @@ version.
 
 #include <string>
 
+// the MOTD window of the embedded browser takes the mouse while it is shown
+#include "chrome/chrome_host.h"
+
+static bool ModalWindowShown( void )
+{
+	return Chrome::IsMotdShown();
+}
+
 /*
  * We will draw all elements inside a box. It's size 16x10.
  */
@@ -736,7 +744,7 @@ void CHudSpectatorGui::SyncTouchMode( void )
 	if( !g_iMobileAPIVersion )
 		return;
 
-	const bool want = ( m_menuFlags & ROOT_MENU ) != 0;
+	const bool want = ( m_menuFlags & ROOT_MENU ) && !ModalWindowShown();
 
 	// on: set every frame (a closed HUD menu turns the mode off), off: once
 	if( want || m_bTouchClientOnly )
@@ -747,7 +755,7 @@ void CHudSpectatorGui::SyncTouchMode( void )
 
 bool CHudSpectatorGui::KeyEvent( int down, int keynum )
 {
-	if( !( m_menuFlags & MENU_PLAYERS ))
+	if( !( m_menuFlags & MENU_PLAYERS ) || ModalWindowShown() )
 		return false;
 
 	if( keynum != K_MWHEELUP && keynum != K_MWHEELDOWN )

@@ -28,7 +28,10 @@
 #include "draw_util.h"
 #include "build.h"
 #include "motd_util.h"
+#include "chrome/chrome_motd_utf.h"
 #include <chrono>
+#include <string>
+#include "chrome/chrome_host.h"
 
 #if XASH_WIN32 == 1 || XASH_PSVITA == 1
 #define strcasestr strstr
@@ -41,9 +44,11 @@ int CHudMOTD :: Init( void )
 	HOOK_MESSAGE( gHUD.m_MOTD, MOTD );
 
 	cl_hide_motd = CVAR_CREATE("cl_hide_motd", "0", FCVAR_ARCHIVE); // hide motd
-	// 0 - show MOTD inside the game as text, 1 - open URL and HTML MOTD in the system browser
-	// (a value above 1 works like 1, so the values 2 and 3 that older builds saved in a config keep working)
-	cl_motd_browser = CVAR_CREATE("cl_motd_browser", "1", FCVAR_ARCHIVE);
+	// 0 - show MOTD inside the game as text, 1 - open URL and HTML MOTD in the system browser,
+	// 2 - show URL and HTML MOTD in the game by the embedded browser (CEF), falls back to 1 if CEF is not available
+	// (a value above 2 works like 2, so the value 3 that older builds saved in a config keeps working;
+	// the value 2 of older builds meant the system browser, it is 1 now)
+	cl_motd_browser = CVAR_CREATE("cl_motd_browser", "2", FCVAR_ARCHIVE);
 	// 1 - if HTML MOTD contains an iframe with an http(s) address, open that address instead of the whole page
 	cl_motd_browser_iframe = CVAR_CREATE("cl_motd_browser_iframe", "1", FCVAR_ARCHIVE);
 	ResetBrowserState();
@@ -56,6 +61,7 @@ int CHudMOTD :: VidInit( void )
 {
 	// Load sprites here
 	ResetBrowserState();
+	Chrome::HideMotdOnLevelChange();
 	return 1;
 }
 
@@ -91,6 +97,64 @@ static bool MotdBrowserAllowed( void )
 
 	lastOpen = now;
 	return true;
+}
+
+// MOTD HTML is given to the embedded browser as a data: address. The page is converted to UTF-8 first
+// (a page that is not valid UTF-8 is taken as Windows-1251, like the server names), because the
+// charset of a data: address is stronger than <meta charset> inside the page.
+static std::string MakeHtmlDataUrl( const char *html, bool cutByBuffer )
+{
+	static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+	std::string page( html );
+
+	// a long UTF-8 page cut at the end of the buffer may end in the middle of a letter: drop that piece,
+	// so the page is not taken as Windows-1251 because of it (only then: a short page ending in such
+	// bytes is a Windows-1251 page)
+	if( cutByBuffer && !iHTMLChrome::CEF::IsValidUtf8( page.c_str() ))
+	{
+		// the last lead byte of a UTF-8 letter in the last 3 bytes, followed only by continuation bytes,
+		// and fewer of them than the letter needs: that is a letter cut off by the end of the buffer
+		const size_t size = page.size();
+
+		for( size_t start = size; start > 0 && size - start < 3; )
+		{
+			--start;
+			const unsigned char c = (unsigned char)page[start];
+
+			if(( c & 0xC0 ) == 0x80 )
+				continue; // a continuation byte, the lead byte is further left
+
+			const size_t need = ( c >= 0xC2 && c <= 0xDF ) ? 2 : ( c >= 0xE0 && c <= 0xEF ) ? 3 : ( c >= 0xF0 && c <= 0xF4 ) ? 4 : 0;
+			const std::string shorter = page.substr( 0, start );
+
+			if( need > size - start && iHTMLChrome::CEF::IsValidUtf8( shorter.c_str() ))
+				page = shorter;
+
+			break;
+		}
+	}
+
+	const std::string text = iHTMLChrome::CEF::ToUtf8( page.c_str() );
+	const size_t len = text.size();
+
+	std::string out = "data:text/html;charset=utf-8;base64,";
+	out.reserve( out.size() + ( len + 2 ) / 3 * 4 );
+
+	for( size_t i = 0; i < len; i += 3 )
+	{
+		unsigned int v = (unsigned char)text[i] << 16;
+		const size_t n = len - i;
+
+		if( n > 1 ) v |= (unsigned char)text[i + 1] << 8;
+		if( n > 2 ) v |= (unsigned char)text[i + 2];
+
+		out += b64[( v >> 18 ) & 63];
+		out += b64[( v >> 12 ) & 63];
+		out += ( n > 1 ) ? b64[( v >> 6 ) & 63] : '=';
+		out += ( n > 2 ) ? b64[v & 63] : '=';
+	}
+
+	return out;
 }
 
 #endif // MOTD_SYSTEM_BROWSER
@@ -161,6 +225,8 @@ bool CHudMOTD :: HandleBrowserMOTD( const char *chunk, bool finished )
 		return true;
 
 	// whole MOTD received
+	// mode 2: the page is shown in the game by the built-in browser (falls back to the system browser if it is not available)
+	const bool cef = mode >= 2;
 	char safeUrl[4096];
 
 	if( m_iBrowserMode == BROWSER_URL )
@@ -178,6 +244,8 @@ bool CHudMOTD :: HandleBrowserMOTD( const char *chunk, bool finished )
 		// only http(s) links, made safe for the command line of the browser
 		if( !MotdUtil::MakeSafeUrl( url, safeUrl, sizeof( safeUrl )))
 			gEngfuncs.Con_Printf( "MOTD: the address is not usable, skipped\n" );
+		else if( cef && Chrome::ShowMotd( safeUrl ))
+			gEngfuncs.Con_Printf( "Showing MOTD in the game browser: %s\n", safeUrl );
 		else if( MotdBrowserAllowed( ))
 		{
 			gEngfuncs.Con_Printf( "Opening MOTD in browser: %s\n", safeUrl );
@@ -189,7 +257,12 @@ bool CHudMOTD :: HandleBrowserMOTD( const char *chunk, bool finished )
 		char iframeUrl[2048];
 		char path[1024];
 
-		if( !MotdBrowserAllowed( ))
+		if( cef && Chrome::ShowMotd( MakeHtmlDataUrl( m_szBrowserMOTD, m_iBrowserLen >= (int)sizeof( m_szBrowserMOTD ) - 1 ).c_str() ))
+		{
+			// the whole page is shown, like the original embedded browser does
+			gEngfuncs.Con_Printf( "Showing MOTD in the game browser\n" );
+		}
+		else if( !MotdBrowserAllowed( ))
 		{
 			// skipped, the message is printed
 		}
