@@ -513,6 +513,8 @@ public:
 	CHudMsgFunc(DeathMsg);
 
 private:
+	bool DrawSteam( int i, int y ); // a row as in the Steam version (death.cpp); false without the font atlases
+
 	int m_HUD_d_skull;  // sprite index of skull icon
 	int m_HUD_d_headshot;
 	cvar_t *hud_deathnotice_time;
