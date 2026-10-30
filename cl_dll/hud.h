@@ -37,6 +37,9 @@
 #include "csprite.h"
 #include "cvardef.h"
 #include "utlstring.h"
+#include <string>
+#include <vector>
+#include "hud/tutor_logic.h"
 #include "hud/text_texture.h"
 
 #define MIN_ALPHA	 100	
@@ -889,6 +892,50 @@ private:
 //-----------------------------------------------------
 //
 
+// Tutor messages of the server (TutorText, TutorClose), see hud/tutor.cpp
+class CHudTutor : public CHudBase
+{
+public:
+	int Init( void );
+	int VidInit( void );
+	int Draw( float flTime );
+	void InitHUDData( void );
+
+	CHudMsgFunc(TutorText);
+	CHudMsgFunc(TutorClose);
+	CHudMsgFunc(TutorState);
+	CHudMsgFunc(TutorLine);
+
+private:
+	void Hide( void );
+	void FreeText( void );
+	void LoadResources( void );
+	void BuildText( int maxWidth );
+
+	cvar_t *cl_tutor;
+	cvar_t *cl_tutor_maxtime;
+
+	bool m_bShow;
+	int m_iType;
+	float m_flShownAt;
+	std::string m_szText;
+
+	Tutor::Scheme m_scheme;
+	bool m_bSchemeLoaded;
+	int m_iIconTex[Tutor::ICON_COUNT];
+	bool m_bIconTried[Tutor::ICON_COUNT];
+
+	CTextTexture m_text;     // the text in a Windows font (from its atlas)
+	bool m_bTextAtlas;       // m_text is used (else the lines in the font of the HUD)
+	int m_iTextW, m_iTextH;
+	bool m_bTextDirty;
+	std::vector<std::string> m_lines; // the text for the font of the HUD
+};
+
+//
+//-----------------------------------------------------
+//
+
 class CHudScenario : public CHudBase
 {
 public:
@@ -1122,6 +1169,7 @@ public:
 	CHudRadar       m_Radar;
 	CHudSpectatorGui m_SpectatorGui;
 	CHudScenario	m_Scenario;
+	CHudTutor       m_Tutor;
 
 	// user messages
 	CHudMsgFunc(Damage);
