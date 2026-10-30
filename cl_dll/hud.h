@@ -368,7 +368,9 @@ public:
 	int VidInit( void );
 	int Draw( float flTime );
 
+	void Shutdown( void );
 	int DrawScoreboard( float flTime );
+	bool DrawSteamStyle( void ); // the table of the Steam version; false if the fonts of Windows are not available
 	int DrawTeams( float listslot );
 	int DrawPlayers( float listslot, int nameoffset = 0, const char *team = NULL ); // returns the ypos where it finishes drawing
 
