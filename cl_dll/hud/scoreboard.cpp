@@ -188,6 +188,45 @@ void CHudScoreboard :: InitHUDData( void )
 	m_iFlags &= ~HUD_DRAW;  // starts out inactive
 
 	m_iFlags |= HUD_INTERMISSION; // is always drawn during an intermission
+	m_iFlags |= HUD_THINK; // follows the players who leave and come (see Think)
+	memset( m_bSlotUsed, 0, sizeof( m_bSlotUsed ));
+}
+
+// The team, the score and the rest of a slot belong to the player who had it. When he leaves, nothing of the server
+// says so to the client, and a player who takes the slot later was shown in the old team, with the old score, till
+// the server sent his own TeamInfo (on some servers only when he chose a team). Now a slot that empties is cleared,
+// and a player who comes without a team is among the spectators (as the server makes him: "UNASSIGNED"), as in the
+// Steam version.
+void CHudScoreboard :: Think( void )
+{
+	bool changed = false;
+
+	for( int i = 1; i <= MAX_PLAYERS; i++ )
+	{
+		hud_player_info_t info = {};
+		GetPlayerInfo( i, &info );
+		const bool used = info.name && info.name[0];
+
+		if( !used && m_bSlotUsed[i] )
+		{
+			memset( &g_PlayerExtraInfo[i], 0, sizeof( g_PlayerExtraInfo[i] ));
+			g_PlayerExtraInfo[i].sb_health = -1;
+			g_PlayerExtraInfo[i].sb_account = -1;
+			changed = true;
+		}
+		else if( used && !m_bSlotUsed[i] && gHUD.m_Teamplay && !g_PlayerExtraInfo[i].teamname[0] )
+		{
+			strncpy( g_PlayerExtraInfo[i].teamname, "SPECTATOR", MAX_TEAM_NAME );
+			g_PlayerExtraInfo[i].teamname[MAX_TEAM_NAME - 1] = 0;
+			g_PlayerExtraInfo[i].teamnumber = TEAM_UNASSIGNED;
+			changed = true;
+		}
+
+		m_bSlotUsed[i] = used;
+	}
+
+	if( changed )
+		RebuildTeams();
 }
 
 bool CHudScoreboard :: ShouldDrawScoreboard() const
@@ -677,7 +716,13 @@ int CHudScoreboard :: MsgFunc_TeamInfo( const char *pszName, int iSize, void *pb
 		g_PlayerExtraInfo[cl].teamnumber = teamNumber;
 	}
 
-	// rebuild the list of teams
+	RebuildTeams();
+	return 1;
+}
+
+// the list of teams from the teams of the players
+void CHudScoreboard :: RebuildTeams( void )
+{
 
 	// clear out player counts from teams
 	for ( int i = 1; i <= m_iNumTeams; i++ )
@@ -734,8 +779,6 @@ int CHudScoreboard :: MsgFunc_TeamInfo( const char *pszName, int iSize, void *pb
 		if ( g_TeamInfo[i].players < 1 )
 			memset( &g_TeamInfo[i], 0, sizeof(team_info_t) );
 	}
-
-	return 1;
 }
 
 // Message handler for TeamScore message

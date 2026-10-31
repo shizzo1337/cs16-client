@@ -374,6 +374,8 @@ public:
 	void DeathMsg( int killer, int victim );
 	void SetScoreboardDefaults( void );
 	void GetAllPlayersInfo( void );
+	void Think( void );
+	void RebuildTeams( void );
 
 	bool ShouldDrawScoreboard() const;
 
@@ -399,6 +401,7 @@ private:
 	RGBA m_colors;
 	bool m_bDrawStroke;
 	float m_flForceRect[4]; // showscoreboard2 rectangle
+	bool m_bSlotUsed[MAX_PLAYERS + 1]; // the slots that had a player at the last Think
 	cvar_t *cl_showpacketloss;
 	cvar_t *cl_showplayerversion;
 	cvar_t *cl_show_scoreboard_on_death;
